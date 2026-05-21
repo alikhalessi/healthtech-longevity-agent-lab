@@ -19,9 +19,6 @@ def slugify(text: str, max_length: int = 50) -> str:
 
 
 def normalize_for_hash(text: str) -> str:
-    """
-    Normalize text so small whitespace differences do not create duplicates.
-    """
     return re.sub(r"\s+", " ", text.strip().lower())
 
 
@@ -40,7 +37,6 @@ def find_existing_source_by_hash(content_hash: str) -> tuple[SourceRecord, Path]
 
             existing_hash = data.get("content_hash")
 
-            # Backward-compatible fallback for old source files that do not have content_hash yet.
             if not existing_hash and data.get("text"):
                 existing_hash = compute_content_hash(data["text"])
 
@@ -60,17 +56,6 @@ def save_source(
     url: str | None = None,
     tags: List[str] | None = None,
 ) -> tuple[SourceRecord, Path, bool]:
-    """
-    Save source if it is new.
-
-    Returns:
-        SourceRecord
-        Path
-        was_created_new: bool
-
-    If the same normalized source text already exists, return the existing source
-    instead of creating duplicate garbage.
-    """
     SOURCES_DIR.mkdir(parents=True, exist_ok=True)
 
     content_hash = compute_content_hash(source_text)
@@ -203,3 +188,68 @@ def load_source_by_path(path_text: str) -> SourceRecord:
         data = json.load(f)
 
     return SourceRecord(**data)
+
+
+def update_source_by_path(
+    path_text: str,
+    title: str,
+    source_text: str,
+    source_type: str,
+    url: str | None = None,
+    tags: List[str] | None = None,
+) -> tuple[SourceRecord, Path]:
+    path = Path(path_text)
+
+    with path.open("r", encoding="utf-8") as f:
+        old_data = json.load(f)
+
+    new_hash = compute_content_hash(source_text)
+
+    for other_path in SOURCES_DIR.glob("*.json"):
+        if other_path.resolve() == path.resolve():
+            continue
+
+        try:
+            with other_path.open("r", encoding="utf-8") as f:
+                other_data = json.load(f)
+
+            other_hash = other_data.get("content_hash")
+            if not other_hash and other_data.get("text"):
+                other_hash = compute_content_hash(other_data["text"])
+
+            if other_hash == new_hash:
+                raise ValueError(
+                    f"Duplicate detected. This text already exists in: {other_path}"
+                )
+        except ValueError:
+            raise
+        except Exception:
+            continue
+
+    updated = SourceRecord(
+        source_id=old_data.get("source_id", path.stem),
+        title=title.strip() or "Untitled source",
+        source_type=source_type,
+        url=url.strip() if url else None,
+        tags=tags or [],
+        text=source_text,
+        text_preview=source_text[:500],
+        character_count=len(source_text),
+        created_at=old_data.get("created_at", datetime.now().isoformat(timespec="seconds")),
+        content_hash=new_hash,
+    )
+
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(updated.model_dump(), f, indent=2, ensure_ascii=False)
+
+    return updated, path
+
+
+def delete_source_by_path(path_text: str) -> Path:
+    path = Path(path_text)
+
+    if not path.exists():
+        raise FileNotFoundError(f"Source file not found: {path}")
+
+    path.unlink()
+    return path

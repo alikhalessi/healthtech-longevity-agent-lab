@@ -7,7 +7,7 @@ from app.agents.claim_extractor_agent import extract_claims_with_ai, extract_cla
 from app.services.report_writer import save_report
 from app.services.batch_report_writer import save_batch_report
 from app.services.finetune_logger import log_finetune_candidate
-from app.services.source_library import save_source, list_sources, load_source_by_path, filter_sources, get_available_source_types, get_available_tags
+from app.services.source_library import save_source, list_sources, load_source_by_path, filter_sources, get_available_source_types, get_available_tags, update_source_by_path, delete_source_by_path, update_source_by_path, delete_source_by_path
 from app.services.source_chunker import rebuild_chunk_library, load_chunks, search_chunks
 
 
@@ -367,6 +367,94 @@ with tab_library:
                 disabled=True,
             )
 
+            with st.expander("Edit or Delete Selected Source"):
+                edited_title = st.text_input(
+                    "Edit title:",
+                    value=selected_source.title,
+                    key=f"edit_title_{selected_source.source_id}",
+                )
+
+                edited_url = st.text_input(
+                    "Edit URL/reference:",
+                    value=selected_source.url or "",
+                    key=f"edit_url_{selected_source.source_id}",
+                )
+
+                source_type_options = ["article", "abstract", "paper", "web_text", "note", "other"]
+                selected_type_index = (
+                    source_type_options.index(selected_source.source_type)
+                    if selected_source.source_type in source_type_options
+                    else 0
+                )
+
+                edited_source_type = st.selectbox(
+                    "Edit source type:",
+                    source_type_options,
+                    index=selected_type_index,
+                    key=f"edit_type_{selected_source.source_id}",
+                )
+
+                edited_tags_text = st.text_input(
+                    "Edit tags, comma-separated:",
+                    value=", ".join(selected_source.tags),
+                    key=f"edit_tags_{selected_source.source_id}",
+                )
+
+                edited_text = st.text_area(
+                    "Edit full source text:",
+                    value=selected_source.text,
+                    height=360,
+                    key=f"edit_text_{selected_source.source_id}",
+                )
+
+                col_save, col_delete = st.columns(2)
+
+                with col_save:
+                    if st.button("Save Source Edits"):
+                        try:
+                            edited_tags = [
+                                tag.strip()
+                                for tag in edited_tags_text.split(",")
+                                if tag.strip()
+                            ]
+
+                            updated_source, updated_path = update_source_by_path(
+                                path_text=selected_path,
+                                title=edited_title,
+                                source_text=edited_text,
+                                source_type=edited_source_type,
+                                url=edited_url,
+                                tags=edited_tags,
+                            )
+
+                            st.success(f"Source updated: {updated_path}")
+                            st.warning("Rebuild chunk library after editing source text.")
+                            st.rerun()
+
+                        except Exception as error:
+                            st.error("Source update failed.")
+                            st.exception(error)
+
+                with col_delete:
+                    confirm_delete = st.checkbox(
+                        "I understand this permanently deletes the selected source file.",
+                        key=f"confirm_delete_{selected_source.source_id}",
+                    )
+
+                    if st.button("Delete Selected Source"):
+                        if not confirm_delete:
+                            st.warning("Tick the confirmation checkbox before deleting.")
+                        else:
+                            try:
+                                deleted_path = delete_source_by_path(selected_path)
+                                st.success(f"Deleted source: {deleted_path}")
+                                st.warning("Rebuild chunk library after deleting sources.")
+                                st.rerun()
+
+                            except Exception as error:
+                                st.error("Source deletion failed.")
+                                st.exception(error)
+
             library_extraction_mode = st.radio(
                 "Claim extraction mode for selected source:",
                 ["OpenAI AI", "Local simple"],
@@ -523,6 +611,8 @@ with tab_chunks:
         except Exception as error:
             st.error("Chunk search failed.")
             st.exception(error)
+
+
 
 
 

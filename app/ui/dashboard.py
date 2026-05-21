@@ -7,7 +7,7 @@ from app.agents.claim_extractor_agent import extract_claims_with_ai, extract_cla
 from app.services.report_writer import save_report
 from app.services.batch_report_writer import save_batch_report
 from app.services.finetune_logger import log_finetune_candidate
-from app.services.source_library import save_source, list_sources, load_source_by_path
+from app.services.source_library import save_source, list_sources, load_source_by_path, filter_sources, get_available_source_types, get_available_tags
 
 
 st.set_page_config(
@@ -272,73 +272,123 @@ with tab_library:
         "This keeps private pasted source text out of GitHub."
     )
 
-    sources = list_sources()
+    all_sources = list_sources()
 
-    if not sources:
+    if not all_sources:
         st.info("No saved sources yet.")
     else:
-        sources_df = pd.DataFrame(sources)
-        st.subheader("Saved Sources")
-        st.dataframe(sources_df.drop(columns=["path"]), use_container_width=True)
+        st.subheader("Search and Filter")
 
-        options = {
-            f"{row['created_at']} | {row['title']} | {row['source_id']}": row["path"]
-            for row in sources
-        }
+        col_search, col_type, col_tag = st.columns([2, 1, 1])
 
-        selected_label = st.selectbox(
-            "Select a source to inspect or re-analyze:",
-            list(options.keys()),
+        with col_search:
+            search_query = st.text_input(
+                "Search title, tags, source ID, or preview text:",
+                value="",
+                key="library_search_query",
+            )
+
+        with col_type:
+            source_type_filter = st.selectbox(
+                "Source type:",
+                get_available_source_types(all_sources),
+                key="library_source_type_filter",
+            )
+
+        with col_tag:
+            tag_filter = st.selectbox(
+                "Tag:",
+                get_available_tags(all_sources),
+                key="library_tag_filter",
+            )
+
+        filtered_sources = filter_sources(
+            rows=all_sources,
+            search_query=search_query,
+            source_type_filter=source_type_filter,
+            tag_filter=tag_filter,
         )
 
-        selected_path = options[selected_label]
-        selected_source = load_source_by_path(selected_path)
+        st.caption(f"Showing {len(filtered_sources)} of {len(all_sources)} saved sources.")
 
-        st.subheader("Selected Source")
-        st.write("Title:", selected_source.title)
-        st.write("Type:", selected_source.source_type)
-        st.write("URL:", selected_source.url or "None")
-        st.write("Tags:", ", ".join(selected_source.tags) if selected_source.tags else "None")
-        st.write("Character count:", selected_source.character_count)
+        if not filtered_sources:
+            st.warning("No sources match the current filters.")
+        else:
+            sources_df = pd.DataFrame(filtered_sources)
 
-        st.text_area(
-            "Source text preview:",
-            value=selected_source.text[:3000],
-            height=280,
-            disabled=True,
-        )
+            st.subheader("Saved Sources")
+            visible_columns = [
+                "created_at",
+                "title",
+                "source_type",
+                "character_count",
+                "tags",
+                "source_id",
+            ]
+            st.dataframe(
+                sources_df[visible_columns],
+                use_container_width=True,
+            )
 
-        library_extraction_mode = st.radio(
-            "Claim extraction mode for selected source:",
-            ["OpenAI AI", "Local simple"],
-            horizontal=True,
-            key="library_extraction_mode",
-        )
+            options = {
+                f"{row['created_at']} | {row['title']} | {row['source_id']}": row["path"]
+                for row in filtered_sources
+            }
 
-        library_analysis_mode = st.radio(
-            "Claim analysis mode for selected source:",
-            ["OpenAI AI", "Local rule-based"],
-            horizontal=True,
-            key="library_analysis_mode",
-        )
+            selected_label = st.selectbox(
+                "Select a source to inspect or re-analyze:",
+                list(options.keys()),
+            )
 
-        if st.button("Re-analyze Selected Source"):
-            try:
-                extraction, rows, batch_path = run_article_pipeline(
-                    source_title=selected_source.title,
-                    article_text=selected_source.text,
-                    extraction_mode=library_extraction_mode,
-                    claim_analysis_mode=library_analysis_mode,
-                )
+            selected_path = options[selected_label]
+            selected_source = load_source_by_path(selected_path)
 
-                st.subheader("Extraction Summary")
-                st.write(extraction.extraction_summary)
+            st.subheader("Selected Source")
+            st.write("Title:", selected_source.title)
+            st.write("Type:", selected_source.source_type)
+            st.write("URL:", selected_source.url or "None")
+            st.write("Tags:", ", ".join(selected_source.tags) if selected_source.tags else "None")
+            st.write("Character count:", selected_source.character_count)
+            st.write("Created at:", selected_source.created_at)
 
-                if rows:
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            st.text_area(
+                "Source text preview:",
+                value=selected_source.text[:3000],
+                height=280,
+                disabled=True,
+            )
 
-                st.success(f"Batch report saved locally: {batch_path}")
+            library_extraction_mode = st.radio(
+                "Claim extraction mode for selected source:",
+                ["OpenAI AI", "Local simple"],
+                horizontal=True,
+                key="library_extraction_mode",
+            )
 
-            except Exception as error:
-                st.error("Source re-analysis failed.")
-                st.exception(error)
+            library_analysis_mode = st.radio(
+                "Claim analysis mode for selected source:",
+                ["OpenAI AI", "Local rule-based"],
+                horizontal=True,
+                key="library_analysis_mode",
+            )
+
+            if st.button("Re-analyze Selected Source"):
+                try:
+                    extraction, rows, batch_path = run_article_pipeline(
+                        source_title=selected_source.title,
+                        article_text=selected_source.text,
+                        extraction_mode=library_extraction_mode,
+                        claim_analysis_mode=library_analysis_mode,
+                    )
+
+                    st.subheader("Extraction Summary")
+                    st.write(extraction.extraction_summary)
+
+                    if rows:
+                        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+                    st.success(f"Batch report saved locally: {batch_path}")
+
+                except Exception as error:
+                    st.error("Source re-analysis failed.")
+                    st.exception(error)

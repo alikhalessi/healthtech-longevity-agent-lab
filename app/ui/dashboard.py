@@ -27,7 +27,7 @@ if st.button("Analyze"):
     report = analyze_text(text)
     saved_path = save_report(report)
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric("Evidence Level", report.evidence_level)
@@ -37,6 +37,9 @@ if st.button("Analyze"):
 
     with col3:
         st.metric("Hype Score", report.hype_score)
+
+    with col4:
+        st.metric("Fine-tune Candidate", "Yes" if report.fine_tune_candidate else "No")
 
     st.subheader("Main Claim")
     st.write(report.main_claim)

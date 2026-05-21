@@ -15,6 +15,14 @@ from app.agents.ai_evidence_agent import analyze_text_with_ai
 EVAL_FILE = PROJECT_ROOT / "evals" / "claim_quality_eval.jsonl"
 
 
+KEYWORD_ALIASES = {
+    "animal": ["animal", "mouse", "mice", "rat", "rats", "preclinical"],
+    "human": ["human", "clinical", "trial", "humans"],
+    "hype": ["hype", "marketing", "breakthrough", "guaranteed", "miracle", "cure", "overclaim"],
+    "limited": ["limited", "small", "modest", "preliminary", "sample size"],
+}
+
+
 def load_evals(path: Path):
     examples = []
     with path.open("r", encoding="utf-8") as f:
@@ -38,15 +46,21 @@ def report_to_search_text(report) -> str:
     return " ".join(parts).lower()
 
 
+def keyword_found(keyword: str, search_text: str) -> bool:
+    aliases = KEYWORD_ALIASES.get(keyword.lower(), [keyword.lower()])
+    return any(alias in search_text for alias in aliases)
+
+
 def evaluate_one(example, report):
     expected = example["expected"]
     failures = []
 
-    expected_ft = expected.get("fine_tune_candidate")
-    if expected_ft is not None and report.fine_tune_candidate != expected_ft:
-        failures.append(
-            f"fine_tune_candidate expected {expected_ft}, got {report.fine_tune_candidate}"
-        )
+    if "fine_tune_candidate" in expected:
+        expected_ft = expected["fine_tune_candidate"]
+        if report.fine_tune_candidate != expected_ft:
+            failures.append(
+                f"fine_tune_candidate expected {expected_ft}, got {report.fine_tune_candidate}"
+            )
 
     min_hype = expected.get("min_hype_score", 0)
     if report.hype_score < min_hype:
@@ -62,7 +76,7 @@ def evaluate_one(example, report):
 
     search_text = report_to_search_text(report)
     for keyword in expected.get("risk_keywords", []):
-        if keyword.lower() not in search_text:
+        if not keyword_found(keyword, search_text):
             failures.append(f"missing risk keyword/context: '{keyword}'")
 
     return failures

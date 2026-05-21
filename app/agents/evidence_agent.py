@@ -52,11 +52,26 @@ def analyze_text(text: str) -> EvidenceReport:
         "no clinical evidence",
         "no strong clinical",
         "no strong human clinical trial evidence",
+        "without any clinical trial evidence",
+        "without clinical trial evidence",
+        "no human studies",
+        "no human studies yet",
+    ]
+
+    limited_study_phrases = [
+        "small randomized",
+        "small clinical trial",
+        "sample size was limited",
+        "limited sample size",
+        "modest improvement",
+        "preliminary",
+        "early evidence",
     ]
 
     has_animal_evidence = any(term in lowered for term in animal_terms)
     has_human_evidence = any(term in lowered for term in human_terms)
     has_negative_human_phrase = any(phrase in lowered for phrase in negative_human_phrases)
+    has_limited_study_phrase = any(phrase in lowered for phrase in limited_study_phrases)
 
     if has_animal_evidence:
         animal_evidence = "moderate"
@@ -69,6 +84,8 @@ def analyze_text(text: str) -> EvidenceReport:
         risk_flags.append("Human evidence appears limited or not strong")
     elif has_human_evidence:
         human_evidence = "limited"
+        if has_limited_study_phrase:
+            risk_flags.append("Human evidence exists but appears small or limited")
     else:
         human_evidence = "unclear"
         risk_flags.append("Human evidence unclear")
@@ -82,11 +99,15 @@ def analyze_text(text: str) -> EvidenceReport:
             + ", ".join(matched_hype_terms)
         )
 
-    if has_animal_evidence and has_negative_human_phrase:
-        hype_score += 1
+    if has_limited_study_phrase:
+        risk_flags.append("Study limitations detected")
 
-    if human_evidence == "limited" and animal_evidence == "moderate":
+    if matched_hype_terms and (has_negative_human_phrase or not has_human_evidence):
+        evidence_level = "weak"
+    elif has_animal_evidence and human_evidence in ["limited", "unclear"]:
         evidence_level = "weak/mixed"
+    elif has_human_evidence and has_limited_study_phrase:
+        evidence_level = "limited/mixed"
     elif human_evidence == "unclear":
         evidence_level = "unclear"
     else:
@@ -103,8 +124,9 @@ def analyze_text(text: str) -> EvidenceReport:
         hype_score=min(hype_score, 10),
         risk_flags=risk_flags,
         safe_summary=(
-            "This claim needs cautious interpretation. Early animal or limited human evidence "
-            "should not be treated as proof of a real longevity benefit in humans."
+            "This claim needs cautious interpretation. Weak, early-stage, animal-only, "
+            "or limited human evidence should not be treated as proof of a real longevity "
+            "benefit in humans."
         ),
         fine_tune_candidate=fine_tune_candidate,
     )

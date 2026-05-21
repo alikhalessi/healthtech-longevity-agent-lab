@@ -16,20 +16,14 @@ The system supports:
 ## High-Level Flow
 
 User claim/article
-?
-Streamlit dashboard
-?
-Analysis mode selector
-+-- Local rule-based analyzer
-+-- OpenAI AI analyzer
-?
-EvidenceReport schema
-?
-Report writer
-?
-Fine-tune candidate logger
-?
-Eval runner
+- Streamlit dashboard
+- Analysis mode selector
+  - Local rule-based analyzer
+  - OpenAI AI analyzer
+- EvidenceReport schema
+- Report writer
+- Fine-tune candidate logger
+- Eval runner
 
 ## Core Components
 

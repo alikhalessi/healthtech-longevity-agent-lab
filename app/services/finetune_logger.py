@@ -10,12 +10,6 @@ FINETUNE_FILE = FINETUNE_DIR / "claim_classifier.jsonl"
 
 
 def log_finetune_candidate(source_text: str, report: EvidenceReport) -> Path:
-    """
-    Save one future fine-tuning candidate in JSONL format.
-
-    This does not fine-tune anything yet.
-    It only collects clean examples for later eval/fine-tuning work.
-    """
     FINETUNE_DIR.mkdir(parents=True, exist_ok=True)
 
     example = {
@@ -38,7 +32,7 @@ def log_finetune_candidate(source_text: str, report: EvidenceReport) -> Path:
             },
         ],
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "failure_or_interest_reason": "weak evidence, hype language, or limited human evidence detected",
+        "reason": "weak evidence, hype language, or limited human evidence detected",
     }
 
     with FINETUNE_FILE.open("a", encoding="utf-8") as f:

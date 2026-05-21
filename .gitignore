@@ -6,6 +6,7 @@ __pycache__/
 *.pyd
 data/raw/
 data/vector_store/
+data/sources/*.json
 reports/
 finetune_candidates/*.jsonl
 .ipynb_checkpoints/

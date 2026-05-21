@@ -7,6 +7,7 @@ from app.agents.claim_extractor_agent import extract_claims_with_ai, extract_cla
 from app.services.report_writer import save_report
 from app.services.batch_report_writer import save_batch_report
 from app.services.finetune_logger import log_finetune_candidate
+from app.services.source_library import save_source, list_sources, load_source_by_path
 
 
 st.set_page_config(
@@ -18,7 +19,7 @@ st.set_page_config(
 st.title("HealthTech Longevity Agent Lab")
 st.caption(
     "Agentic AI blueprint for longevity evidence analysis, hype detection, "
-    "evals, source ingestion, and fine-tuning candidates."
+    "evals, source ingestion, source library, and fine-tuning candidates."
 )
 
 st.warning("Research and education only. Not medical diagnosis or treatment advice.")
@@ -30,7 +31,57 @@ def analyze_claim_text(text: str, mode: str):
     return analyze_text(text)
 
 
-tab_single, tab_article = st.tabs(["Single Claim Analysis", "Article / Abstract Ingestion"])
+def run_article_pipeline(
+    source_title: str,
+    article_text: str,
+    extraction_mode: str,
+    claim_analysis_mode: str,
+):
+    if extraction_mode == "OpenAI AI":
+        extraction = extract_claims_with_ai(article_text, source_title)
+    else:
+        extraction = extract_claims_locally(article_text, source_title)
+
+    evidence_reports = []
+    rows = []
+
+    for index, claim in enumerate(extraction.claims, start=1):
+        report = analyze_claim_text(claim.claim_text, claim_analysis_mode)
+        evidence_reports.append(report)
+
+        save_report(report)
+
+        if report.fine_tune_candidate:
+            log_finetune_candidate(claim.claim_text, report)
+
+        rows.append(
+            {
+                "claim_number": index,
+                "claim_text": claim.claim_text,
+                "claim_type": claim.claim_type,
+                "claim_confidence": claim.confidence,
+                "evidence_level": report.evidence_level,
+                "human_evidence": report.human_evidence,
+                "animal_evidence": report.animal_evidence,
+                "hype_score": report.hype_score,
+                "fine_tune_candidate": report.fine_tune_candidate,
+                "risk_flags": "; ".join(report.risk_flags),
+            }
+        )
+
+    batch_path = save_batch_report(
+        source_title=source_title,
+        source_text=article_text,
+        extraction=extraction,
+        evidence_reports=evidence_reports,
+    )
+
+    return extraction, rows, batch_path
+
+
+tab_single, tab_article, tab_library = st.tabs(
+    ["Single Claim Analysis", "Article / Abstract Ingestion", "Source Library"]
+)
 
 
 with tab_single:
@@ -110,6 +161,31 @@ with tab_article:
     source_title = st.text_input(
         "Source title:",
         value="Untitled longevity source",
+        key="article_source_title",
+    )
+
+    source_url = st.text_input(
+        "Source URL or reference, optional:",
+        value="",
+        key="article_source_url",
+    )
+
+    source_type = st.selectbox(
+        "Source type:",
+        ["article", "abstract", "paper", "web_text", "note", "other"],
+        key="article_source_type",
+    )
+
+    tags_text = st.text_input(
+        "Tags, comma-separated:",
+        value="longevity, evidence",
+        key="article_tags",
+    )
+
+    save_to_library = st.checkbox(
+        "Save this source to local source library",
+        value=True,
+        key="save_to_library",
     )
 
     extraction_mode = st.radio(
@@ -138,12 +214,27 @@ Some media articles describe the finding as a breakthrough for reverse aging."""
         key="article_text",
     )
 
-    if st.button("Extract Claims and Analyze"):
+    if st.button("Save Source, Extract Claims, and Analyze"):
         try:
-            if extraction_mode == "OpenAI AI":
-                extraction = extract_claims_with_ai(article_text, source_title)
-            else:
-                extraction = extract_claims_locally(article_text, source_title)
+            tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
+
+            if save_to_library:
+                source_record, source_path = save_source(
+                    title=source_title,
+                    source_text=article_text,
+                    source_type=source_type,
+                    url=source_url,
+                    tags=tags,
+                )
+                st.success(f"Source saved locally: {source_path}")
+                st.caption(f"Source ID: {source_record.source_id}")
+
+            extraction, rows, batch_path = run_article_pipeline(
+                source_title=source_title,
+                article_text=article_text,
+                extraction_mode=extraction_mode,
+                claim_analysis_mode=claim_analysis_mode,
+            )
 
             st.subheader("Extraction Summary")
             st.write(extraction.extraction_summary)
@@ -151,40 +242,6 @@ Some media articles describe the finding as a breakthrough for reverse aging."""
             if not extraction.claims:
                 st.warning("No claims were extracted.")
             else:
-                evidence_reports = []
-                rows = []
-
-                for index, claim in enumerate(extraction.claims, start=1):
-                    report = analyze_claim_text(claim.claim_text, claim_analysis_mode)
-                    evidence_reports.append(report)
-
-                    save_report(report)
-
-                    if report.fine_tune_candidate:
-                        log_finetune_candidate(claim.claim_text, report)
-
-                    rows.append(
-                        {
-                            "claim_number": index,
-                            "claim_text": claim.claim_text,
-                            "claim_type": claim.claim_type,
-                            "claim_confidence": claim.confidence,
-                            "evidence_level": report.evidence_level,
-                            "human_evidence": report.human_evidence,
-                            "animal_evidence": report.animal_evidence,
-                            "hype_score": report.hype_score,
-                            "fine_tune_candidate": report.fine_tune_candidate,
-                            "risk_flags": "; ".join(report.risk_flags),
-                        }
-                    )
-
-                batch_path = save_batch_report(
-                    source_title=source_title,
-                    source_text=article_text,
-                    extraction=extraction,
-                    evidence_reports=evidence_reports,
-                )
-
                 st.subheader("Extracted Claims and Evidence Analysis")
                 st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
@@ -205,3 +262,83 @@ Some media articles describe the finding as a breakthrough for reverse aging."""
         except Exception as error:
             st.error("Article ingestion failed.")
             st.exception(error)
+
+
+with tab_library:
+    st.header("Source Library")
+
+    st.write(
+        "Saved sources are stored locally in data/sources/ and ignored by Git. "
+        "This keeps private pasted source text out of GitHub."
+    )
+
+    sources = list_sources()
+
+    if not sources:
+        st.info("No saved sources yet.")
+    else:
+        sources_df = pd.DataFrame(sources)
+        st.subheader("Saved Sources")
+        st.dataframe(sources_df.drop(columns=["path"]), use_container_width=True)
+
+        options = {
+            f"{row['created_at']} | {row['title']} | {row['source_id']}": row["path"]
+            for row in sources
+        }
+
+        selected_label = st.selectbox(
+            "Select a source to inspect or re-analyze:",
+            list(options.keys()),
+        )
+
+        selected_path = options[selected_label]
+        selected_source = load_source_by_path(selected_path)
+
+        st.subheader("Selected Source")
+        st.write("Title:", selected_source.title)
+        st.write("Type:", selected_source.source_type)
+        st.write("URL:", selected_source.url or "None")
+        st.write("Tags:", ", ".join(selected_source.tags) if selected_source.tags else "None")
+        st.write("Character count:", selected_source.character_count)
+
+        st.text_area(
+            "Source text preview:",
+            value=selected_source.text[:3000],
+            height=280,
+            disabled=True,
+        )
+
+        library_extraction_mode = st.radio(
+            "Claim extraction mode for selected source:",
+            ["OpenAI AI", "Local simple"],
+            horizontal=True,
+            key="library_extraction_mode",
+        )
+
+        library_analysis_mode = st.radio(
+            "Claim analysis mode for selected source:",
+            ["OpenAI AI", "Local rule-based"],
+            horizontal=True,
+            key="library_analysis_mode",
+        )
+
+        if st.button("Re-analyze Selected Source"):
+            try:
+                extraction, rows, batch_path = run_article_pipeline(
+                    source_title=selected_source.title,
+                    article_text=selected_source.text,
+                    extraction_mode=library_extraction_mode,
+                    claim_analysis_mode=library_analysis_mode,
+                )
+
+                st.subheader("Extraction Summary")
+                st.write(extraction.extraction_summary)
+
+                if rows:
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+                st.success(f"Batch report saved locally: {batch_path}")
+
+            except Exception as error:
+                st.error("Source re-analysis failed.")
+                st.exception(error)

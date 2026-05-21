@@ -7,5 +7,6 @@ __pycache__/
 data/raw/
 data/vector_store/
 reports/
+finetune_candidates/*.jsonl
 .ipynb_checkpoints/
 .DS_Store

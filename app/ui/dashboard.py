@@ -1,16 +1,21 @@
 import streamlit as st
+
 from app.agents.evidence_agent import analyze_text
 from app.services.report_writer import save_report
+from app.services.finetune_logger import log_finetune_candidate
 
 
 st.set_page_config(
     page_title="HealthTech Longevity Agent Lab",
     page_icon="??",
-    layout="wide"
+    layout="wide",
 )
 
 st.title("HealthTech Longevity Agent Lab")
-st.caption("Agentic AI blueprint for longevity evidence analysis, hype detection, evals, and fine-tuning candidates.")
+st.caption(
+    "Agentic AI blueprint for longevity evidence analysis, hype detection, "
+    "evals, and fine-tuning candidates."
+)
 
 st.warning("Research and education only. Not medical diagnosis or treatment advice.")
 
@@ -20,12 +25,16 @@ However, there is no strong human clinical trial evidence yet. Some articles cal
 text = st.text_area(
     "Paste a health-tech or longevity claim/article here:",
     value=sample_text,
-    height=220
+    height=220,
 )
 
 if st.button("Analyze"):
     report = analyze_text(text)
-    saved_path = save_report(report)
+    saved_report_path = save_report(report)
+
+    fine_tune_path = None
+    if report.fine_tune_candidate:
+        fine_tune_path = log_finetune_candidate(text, report)
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -57,4 +66,9 @@ if st.button("Analyze"):
     st.subheader("Structured JSON Output")
     st.json(report.model_dump())
 
-    st.success(f"Report saved locally: {saved_path}")
+    st.success(f"Report saved locally: {saved_report_path}")
+
+    if fine_tune_path:
+        st.info(f"Fine-tuning candidate saved locally: {fine_tune_path}")
+    else:
+        st.info("No fine-tuning candidate saved for this input.")

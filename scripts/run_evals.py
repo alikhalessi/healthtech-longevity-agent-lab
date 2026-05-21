@@ -1,12 +1,18 @@
 import argparse
 import json
+import sys
 from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
 
 from app.agents.evidence_agent import analyze_text
 from app.agents.ai_evidence_agent import analyze_text_with_ai
 
 
-EVAL_FILE = Path("evals/claim_quality_eval.jsonl")
+EVAL_FILE = PROJECT_ROOT / "evals" / "claim_quality_eval.jsonl"
 
 
 def load_evals(path: Path):

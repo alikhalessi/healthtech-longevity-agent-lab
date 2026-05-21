@@ -1,3 +1,4 @@
+import hashlib
 import json
 import re
 from datetime import datetime
@@ -17,14 +18,67 @@ def slugify(text: str, max_length: int = 50) -> str:
     return text[:max_length] or "untitled_source"
 
 
+def normalize_for_hash(text: str) -> str:
+    """
+    Normalize text so small whitespace differences do not create duplicates.
+    """
+    return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def compute_content_hash(text: str) -> str:
+    normalized = normalize_for_hash(text)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def find_existing_source_by_hash(content_hash: str) -> tuple[SourceRecord, Path] | None:
+    SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+
+    for path in SOURCES_DIR.glob("*.json"):
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            existing_hash = data.get("content_hash")
+
+            # Backward-compatible fallback for old source files that do not have content_hash yet.
+            if not existing_hash and data.get("text"):
+                existing_hash = compute_content_hash(data["text"])
+
+            if existing_hash == content_hash:
+                return SourceRecord(**data), path
+
+        except Exception:
+            continue
+
+    return None
+
+
 def save_source(
     title: str,
     source_text: str,
     source_type: str = "article",
     url: str | None = None,
     tags: List[str] | None = None,
-) -> tuple[SourceRecord, Path]:
+) -> tuple[SourceRecord, Path, bool]:
+    """
+    Save source if it is new.
+
+    Returns:
+        SourceRecord
+        Path
+        was_created_new: bool
+
+    If the same normalized source text already exists, return the existing source
+    instead of creating duplicate garbage.
+    """
     SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+
+    content_hash = compute_content_hash(source_text)
+    existing = find_existing_source_by_hash(content_hash)
+
+    if existing:
+        existing_record, existing_path = existing
+        return existing_record, existing_path, False
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     slug = slugify(title)
@@ -40,6 +94,7 @@ def save_source(
         text_preview=source_text[:500],
         character_count=len(source_text),
         created_at=datetime.now().isoformat(timespec="seconds"),
+        content_hash=content_hash,
     )
 
     file_path = SOURCES_DIR / f"{source_id}.json"
@@ -47,7 +102,7 @@ def save_source(
     with file_path.open("w", encoding="utf-8") as f:
         json.dump(record.model_dump(), f, indent=2, ensure_ascii=False)
 
-    return record, file_path
+    return record, file_path, True
 
 
 def list_sources() -> list[dict]:
@@ -68,6 +123,7 @@ def list_sources() -> list[dict]:
                     "character_count": data.get("character_count", 0),
                     "tags": ", ".join(data.get("tags", [])),
                     "text_preview": data.get("text_preview", ""),
+                    "content_hash": data.get("content_hash", ""),
                     "path": str(path),
                 }
             )
@@ -81,6 +137,7 @@ def list_sources() -> list[dict]:
                     "character_count": 0,
                     "tags": "",
                     "text_preview": "",
+                    "content_hash": "",
                     "path": str(path),
                 }
             )

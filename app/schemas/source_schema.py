@@ -12,3 +12,4 @@ class SourceRecord(BaseModel):
     text_preview: str
     character_count: int
     created_at: str
+    content_hash: Optional[str] = None

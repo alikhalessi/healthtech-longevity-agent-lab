@@ -8,6 +8,7 @@ from app.services.report_writer import save_report
 from app.services.batch_report_writer import save_batch_report
 from app.services.finetune_logger import log_finetune_candidate
 from app.services.source_library import save_source, list_sources, load_source_by_path, filter_sources, get_available_source_types, get_available_tags
+from app.services.source_chunker import rebuild_chunk_library, load_chunks, search_chunks
 
 
 st.set_page_config(
@@ -79,8 +80,13 @@ def run_article_pipeline(
     return extraction, rows, batch_path
 
 
-tab_single, tab_article, tab_library = st.tabs(
-    ["Single Claim Analysis", "Article / Abstract Ingestion", "Source Library"]
+tab_single, tab_article, tab_library, tab_chunks = st.tabs(
+    [
+        "Single Claim Analysis",
+        "Article / Abstract Ingestion",
+        "Source Library",
+        "Chunk Search / RAG Prep",
+    ]
 )
 
 
@@ -219,14 +225,17 @@ Some media articles describe the finding as a breakthrough for reverse aging."""
             tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
 
             if save_to_library:
-                source_record, source_path = save_source(
+                source_record, source_path, was_created_new = save_source(
                     title=source_title,
                     source_text=article_text,
                     source_type=source_type,
                     url=source_url,
                     tags=tags,
                 )
-                st.success(f"Source saved locally: {source_path}")
+                if was_created_new:
+                    st.success(f"Source saved locally: {source_path}")
+                else:
+                    st.warning(f"Duplicate source detected. Existing source reused: {source_path}")
                 st.caption(f"Source ID: {source_record.source_id}")
 
             extraction, rows, batch_path = run_article_pipeline(
@@ -392,3 +401,131 @@ with tab_library:
                 except Exception as error:
                     st.error("Source re-analysis failed.")
                     st.exception(error)
+
+
+with tab_chunks:
+    st.header("Chunk Search / RAG Prep")
+
+    st.write(
+        "This tab rebuilds searchable chunks from saved local sources. "
+        "This is keyword-based retrieval for now. Vector embeddings come next."
+    )
+
+    existing_chunks = load_chunks()
+
+    col_count, col_note = st.columns([1, 3])
+
+    with col_count:
+        st.metric("Current Chunks", len(existing_chunks))
+
+    with col_note:
+        st.info(
+            "Chunks are stored locally in data/chunks/source_chunks.jsonl and ignored by Git."
+        )
+
+    st.subheader("Build / Rebuild Chunk Library")
+
+    col_max, col_overlap = st.columns(2)
+
+    with col_max:
+        max_chars = st.number_input(
+            "Max characters per chunk:",
+            min_value=300,
+            max_value=3000,
+            value=1200,
+            step=100,
+        )
+
+    with col_overlap:
+        overlap_chars = st.number_input(
+            "Overlap characters:",
+            min_value=0,
+            max_value=500,
+            value=150,
+            step=25,
+        )
+
+    if st.button("Rebuild Chunk Library"):
+        try:
+            chunk_count, chunk_path = rebuild_chunk_library(
+                max_chars=int(max_chars),
+                overlap_chars=int(overlap_chars),
+            )
+
+            st.success(f"Built {chunk_count} chunks.")
+            st.info(f"Chunk file saved locally: {chunk_path}")
+
+        except Exception as error:
+            st.error("Chunk rebuild failed.")
+            st.exception(error)
+
+    st.subheader("Search Chunks")
+
+    query = st.text_input(
+        "Search saved chunks:",
+        value="longevity",
+        key="chunk_search_query",
+    )
+
+    limit = st.slider(
+        "Maximum results:",
+        min_value=1,
+        max_value=25,
+        value=10,
+    )
+
+    if st.button("Search Chunk Library"):
+        try:
+            results = search_chunks(query=query, limit=int(limit))
+
+            if not results:
+                st.warning("No chunks matched your search.")
+            else:
+                st.success(f"Found {len(results)} matching chunks.")
+
+                rows = []
+                for chunk in results:
+                    rows.append(
+                        {
+                            "chunk_id": chunk.chunk_id,
+                            "source_title": chunk.source_title,
+                            "source_type": chunk.source_type,
+                            "chunk_index": chunk.chunk_index,
+                            "character_count": chunk.character_count,
+                            "tags": ", ".join(chunk.tags),
+                            "preview": chunk.text[:180],
+                        }
+                    )
+
+                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+                st.subheader("Retrieved Chunk Details")
+
+                for index, chunk in enumerate(results, start=1):
+                    with st.expander(
+                        f"{index}. {chunk.source_title} | chunk {chunk.chunk_index}"
+                    ):
+                        st.write("Chunk ID:", chunk.chunk_id)
+                        st.write("Source ID:", chunk.source_id)
+                        st.write("Source title:", chunk.source_title)
+                        st.write("Source type:", chunk.source_type)
+                        st.write("Source URL:", chunk.source_url or "None")
+                        st.write("Tags:", ", ".join(chunk.tags) if chunk.tags else "None")
+                        st.write("Character count:", chunk.character_count)
+                        st.text_area(
+                            "Chunk text:",
+                            value=chunk.text,
+                            height=240,
+                            disabled=True,
+                            key=f"chunk_text_{chunk.chunk_id}",
+                        )
+
+        except Exception as error:
+            st.error("Chunk search failed.")
+            st.exception(error)
+
+
+
+
+
+

@@ -8,6 +8,7 @@ data/raw/
 data/vector_store/
 data/sources/*.json
 data/chunks/*.jsonl
+data/embeddings/*.jsonl
 reports/
 finetune_candidates/*.jsonl
 .ipynb_checkpoints/

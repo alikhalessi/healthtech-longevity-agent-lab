@@ -9,6 +9,7 @@ from app.services.batch_report_writer import save_batch_report
 from app.services.finetune_logger import log_finetune_candidate
 from app.services.source_library import save_source, list_sources, load_source_by_path, filter_sources, get_available_source_types, get_available_tags, update_source_by_path, delete_source_by_path, update_source_by_path, delete_source_by_path
 from app.services.source_chunker import rebuild_chunk_library, load_chunks, search_chunks
+from app.services.vector_store import build_embedding_store, load_embedding_records, semantic_search
 
 
 st.set_page_config(
@@ -80,12 +81,13 @@ def run_article_pipeline(
     return extraction, rows, batch_path
 
 
-tab_single, tab_article, tab_library, tab_chunks = st.tabs(
+tab_single, tab_article, tab_library, tab_chunks, tab_vector = st.tabs(
     [
         "Single Claim Analysis",
         "Article / Abstract Ingestion",
         "Source Library",
         "Chunk Search / RAG Prep",
+        "Vector Search / Semantic RAG",
     ]
 )
 
@@ -619,3 +621,120 @@ with tab_chunks:
 
 
 
+
+
+with tab_vector:
+    st.header("Vector Search / Semantic RAG")
+
+    st.write(
+        "This tab builds OpenAI embeddings for saved chunks and performs semantic search. "
+        "This is the first real RAG layer."
+    )
+
+    embedding_records = load_embedding_records()
+
+    col_count, col_model_note = st.columns([1, 3])
+
+    with col_count:
+        st.metric("Embedding Records", len(embedding_records))
+
+    with col_model_note:
+        st.info(
+            "Embeddings are stored locally in data/embeddings/chunk_embeddings.jsonl and ignored by Git."
+        )
+
+    st.subheader("Build / Rebuild Embedding Store")
+
+    st.warning(
+        "This uses OpenAI API credits. Build chunks first in the Chunk Search / RAG Prep tab."
+    )
+
+    batch_size = st.number_input(
+        "Embedding batch size:",
+        min_value=1,
+        max_value=100,
+        value=50,
+        step=5,
+    )
+
+    if st.button("Build Embeddings From Chunks"):
+        try:
+            count, path = build_embedding_store(batch_size=int(batch_size))
+            st.success(f"Built {count} embedding records.")
+            st.info(f"Embedding file saved locally: {path}")
+            st.rerun()
+
+        except Exception as error:
+            st.error("Embedding build failed.")
+            st.exception(error)
+
+    st.subheader("Semantic Search")
+
+    semantic_query = st.text_input(
+        "Ask a semantic search question:",
+        value="why do organisms age and how does longevity evolve?",
+        key="semantic_search_query",
+    )
+
+    semantic_limit = st.slider(
+        "Maximum semantic results:",
+        min_value=1,
+        max_value=20,
+        value=5,
+        key="semantic_search_limit",
+    )
+
+    if st.button("Run Semantic Search"):
+        try:
+            results = semantic_search(
+                query=semantic_query,
+                limit=int(semantic_limit),
+            )
+
+            if not results:
+                st.warning(
+                    "No embedding records found. Build chunks first, then build embeddings."
+                )
+            else:
+                st.success(f"Found {len(results)} semantic matches.")
+
+                rows = []
+                for result in results:
+                    rows.append(
+                        {
+                            "score": result["similarity_score"],
+                            "source_title": result["source_title"],
+                            "source_type": result["source_type"],
+                            "chunk_index": result["chunk_index"],
+                            "tags": ", ".join(result.get("tags", [])),
+                            "preview": result["text"][:180],
+                        }
+                    )
+
+                st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+                st.subheader("Retrieved Semantic Context")
+
+                for index, result in enumerate(results, start=1):
+                    with st.expander(
+                        f"{index}. Score {result['similarity_score']} | {result['source_title']} | chunk {result['chunk_index']}"
+                    ):
+                        st.write("Chunk ID:", result["chunk_id"])
+                        st.write("Source ID:", result["source_id"])
+                        st.write("Source title:", result["source_title"])
+                        st.write("Source type:", result["source_type"])
+                        st.write("Source URL:", result["source_url"] or "None")
+                        st.write("Tags:", ", ".join(result.get("tags", [])) or "None")
+                        st.write("Similarity score:", result["similarity_score"])
+
+                        st.text_area(
+                            "Retrieved text:",
+                            value=result["text"],
+                            height=260,
+                            disabled=True,
+                            key=f"semantic_chunk_{result['chunk_id']}",
+                        )
+
+        except Exception as error:
+            st.error("Semantic search failed.")
+            st.exception(error)

@@ -10,6 +10,7 @@ from app.services.finetune_logger import log_finetune_candidate
 from app.services.source_library import save_source, list_sources, load_source_by_path, filter_sources, get_available_source_types, get_available_tags, update_source_by_path, delete_source_by_path, update_source_by_path, delete_source_by_path
 from app.services.source_chunker import rebuild_chunk_library, load_chunks, search_chunks
 from app.services.vector_store import build_embedding_store, load_embedding_records, semantic_search
+from app.services.rag_answerer import answer_question_with_rag
 
 
 st.set_page_config(
@@ -81,13 +82,14 @@ def run_article_pipeline(
     return extraction, rows, batch_path
 
 
-tab_single, tab_article, tab_library, tab_chunks, tab_vector = st.tabs(
+tab_single, tab_article, tab_library, tab_chunks, tab_vector, tab_rag = st.tabs(
     [
         "Single Claim Analysis",
         "Article / Abstract Ingestion",
         "Source Library",
         "Chunk Search / RAG Prep",
         "Vector Search / Semantic RAG",
+        "RAG Answering",
     ]
 )
 
@@ -737,4 +739,95 @@ with tab_vector:
 
         except Exception as error:
             st.error("Semantic search failed.")
+            st.exception(error)
+
+
+with tab_rag:
+    st.header("RAG Answering")
+
+    st.write(
+        "Ask a question. The system retrieves relevant embedded chunks and answers using only that retrieved context."
+    )
+
+    st.warning(
+        "RAG answers are research support only. They are not medical diagnosis or treatment advice."
+    )
+
+    rag_records = load_embedding_records()
+
+    col_records, col_status = st.columns([1, 3])
+
+    with col_records:
+        st.metric("Embedding Records", len(rag_records))
+
+    with col_status:
+        if rag_records:
+            st.success("Embedding store is available.")
+        else:
+            st.error("No embeddings found. Build chunks and embeddings first.")
+
+    rag_question = st.text_area(
+        "Ask a question about your saved source library:",
+        value="According to the saved sources, why does ageing evolve and how is longevity related to somatic maintenance?",
+        height=120,
+        key="rag_question",
+    )
+
+    rag_limit = st.slider(
+        "Number of chunks to retrieve:",
+        min_value=1,
+        max_value=10,
+        value=5,
+        key="rag_limit",
+    )
+
+    if st.button("Answer with RAG"):
+        try:
+            rag_answer = answer_question_with_rag(
+                question=rag_question,
+                limit=int(rag_limit),
+            )
+
+            st.subheader("Answer")
+            st.write(rag_answer.answer)
+
+            st.subheader("Evidence Summary")
+            st.write(rag_answer.evidence_summary)
+
+            st.subheader("Limitations")
+            if rag_answer.limitations:
+                for limitation in rag_answer.limitations:
+                    st.warning(limitation)
+            else:
+                st.info("No major limitations listed.")
+
+            st.subheader("Retrieved Context Used")
+            rows = []
+            for ctx in rag_answer.retrieved_context:
+                rows.append(
+                    {
+                        "score": ctx.similarity_score,
+                        "source_title": ctx.source_title,
+                        "chunk_id": ctx.chunk_id,
+                        "chunk_index": ctx.chunk_index,
+                        "preview": ctx.text_preview,
+                    }
+                )
+
+            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+            for index, ctx in enumerate(rag_answer.retrieved_context, start=1):
+                with st.expander(f"{index}. {ctx.source_title} | {ctx.chunk_id}"):
+                    st.write("Similarity score:", ctx.similarity_score)
+                    st.write("Chunk index:", ctx.chunk_index)
+                    st.write(ctx.text_preview)
+
+            st.subheader("Safety Note")
+            st.info(rag_answer.safety_note)
+
+            st.subheader("Structured RAG Output")
+            st.json(rag_answer.model_dump())
+
+        except Exception as error:
+            st.error("RAG answering failed.")
             st.exception(error)

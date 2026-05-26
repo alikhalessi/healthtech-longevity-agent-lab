@@ -11,6 +11,9 @@ from app.services.source_library import save_source, list_sources, load_source_b
 from app.services.source_chunker import rebuild_chunk_library, load_chunks, search_chunks
 from app.services.vector_store import build_embedding_store, load_embedding_records, semantic_search
 from app.services.rag_answerer import answer_question_with_rag
+from app.services.rag_guardrails import evaluate_rag_answer
+from app.services.rag_guardrails import evaluate_rag_answer
+from app.services.rag_guardrails import evaluate_rag_answer
 
 
 st.set_page_config(
@@ -788,6 +791,27 @@ with tab_rag:
                 limit=int(rag_limit),
             )
 
+            guardrail = evaluate_rag_answer(rag_answer)
+
+            st.subheader("Grounding / Safety Guardrail")
+
+            if guardrail.passed:
+                st.success(f"Guardrail passed. Severity: {guardrail.severity}")
+            else:
+                st.error(f"Guardrail failed. Severity: {guardrail.severity}")
+
+            if guardrail.issues:
+                st.write("Issues:")
+                for issue in guardrail.issues:
+                    st.error(issue)
+
+            if guardrail.warnings:
+                st.write("Warnings:")
+                for warning in guardrail.warnings:
+                    st.warning(warning)
+
+            st.info(guardrail.recommended_action)
+
             st.subheader("Answer")
             st.write(rag_answer.answer)
 
@@ -827,6 +851,9 @@ with tab_rag:
 
             st.subheader("Structured RAG Output")
             st.json(rag_answer.model_dump())
+
+            st.subheader("Structured Guardrail Output")
+            st.json(guardrail.model_dump())
 
         except Exception as error:
             st.error("RAG answering failed.")

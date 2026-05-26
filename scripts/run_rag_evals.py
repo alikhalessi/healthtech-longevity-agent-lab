@@ -9,6 +9,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 
 from app.services.rag_answerer import answer_question_with_rag
+from app.services.rag_guardrails import evaluate_rag_answer
 
 
 EVAL_FILE = PROJECT_ROOT / "evals" / "rag_answer_eval.jsonl"
@@ -73,6 +74,10 @@ def evaluate_one(example: dict, answer) -> list[str]:
     if found_forbidden:
         failures.append(f"forbidden unsafe phrase(s) found: {found_forbidden}")
 
+    guardrail = evaluate_rag_answer(answer)
+    if not guardrail.passed:
+        failures.append(f"guardrail failed: {guardrail.issues}")
+
     return failures
 
 
@@ -102,6 +107,7 @@ def main():
             limit=args.limit,
         )
 
+        guardrail = evaluate_rag_answer(answer)
         failures = evaluate_one(example, answer)
 
         if failures:
@@ -113,6 +119,7 @@ def main():
             print("  Evidence summary:", answer.evidence_summary)
             print("  Limitations:", answer.limitations)
             print("  Safety note:", answer.safety_note)
+            print("  Guardrail:", guardrail.model_dump())
             print(
                 "  Retrieved contexts:",
                 [
@@ -127,6 +134,9 @@ def main():
         else:
             passed += 1
             print(f"PASS: {example['id']}")
+            print(f"  Guardrail severity: {guardrail.severity}")
+            if guardrail.warnings:
+                print(f"  Guardrail warnings: {guardrail.warnings}")
 
         print("-" * 80)
 
